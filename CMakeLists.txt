@@ -10,7 +10,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 add_executable(nautical_chart_engine
-    main.c
+   src/main.c
+)
+
+target_include_directories(nautical_chart_engine PRIVATE
+    ${PROJECT_SOURCE_DIR}/include
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
