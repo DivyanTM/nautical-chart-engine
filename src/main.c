@@ -170,7 +170,30 @@ int main(void) {
     printf("%02d\t%s\t%d\t%d\n", i + 1, tag, field_length, field_position);
   }
 
+  int dsid_offset = base_address + 166;
+
+  int dsid_length = 165;
+
+  char *dsid_buffer = malloc(dsid_length);
+
+  if (dsid_buffer == NULL) {
+    perror("malloc for dsid buffer");
+    close(file_fd);
+    free(directory_buffer);
+    return EXIT_FAILURE;
+  }
+
+  lseek(file_fd, dsid_offset, SEEK_SET);
+  read(file_fd, dsid_buffer, dsid_length);
+
+  printf("dsid field\n");
+  for (int i = 0; i < dsid_length; i++) {
+    printf("%02X ", (unsigned char)dsid_buffer[i]);
+  }
+  printf("\n");
+
   free(directory_buffer);
+  free(dsid_buffer);
   close(file_fd);
 
   return EXIT_SUCCESS;
