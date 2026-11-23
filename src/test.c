@@ -1,4 +1,5 @@
 
+#include <asm-generic/errno-base.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -389,13 +390,253 @@ int main(void) {
   }
 
   // ---------------------------------------------------------
-  // 9. CLEAN UP
+  // 9. READ FIRST DR LEADER
+  // ---------------------------------------------------------
+  unsigned long first_dr_offset = record_length;
+  char first_dr_leader_buffer[LEADER_SIZE + 1];
+
+  lseek(file_fd, first_dr_offset, SEEK_SET);
+
+  total_read = 0;
+
+  while (total_read < LEADER_SIZE) {
+    ssize_t bytes_read = read(file_fd, first_dr_leader_buffer + total_read,
+                              LEADER_SIZE - total_read);
+
+    if (bytes_read == -1) {
+      if (errno == EINTR)
+        continue;
+
+      perror("Leader read failed");
+      close(file_fd);
+      return EXIT_FAILURE;
+    }
+
+    if (bytes_read == 0) {
+      fprintf(stderr, "Unexpected end of file\n");
+      close(file_fd);
+      return EXIT_FAILURE;
+    }
+    total_read += (size_t)bytes_read;
+  }
+  first_dr_leader_buffer[LEADER_SIZE] = '\0';
+  printf("\n---- ISO 8211 DR LEADER ---\n");
+  printf("%s\n", first_dr_leader_buffer);
+  printf("\n");
+
+  char dr_record_legth_str[6];
+
+  memcpy(dr_record_legth_str, first_dr_leader_buffer, 5);
+  dr_record_legth_str[5] = '\0';
+
+  unsigned long dr_record_length = strtoul(dr_record_legth_str, NULL, 10);
+  printf("Record length: %lu bytes\n", dr_record_length);
+
+  printf("Interchange level: %c\n", first_dr_leader_buffer[5]);
+  printf("Leader identifier: %c\n", first_dr_leader_buffer[6]);
+  printf("Inline code extension: %c\n", first_dr_leader_buffer[7]);
+  printf("Version: %c\n", first_dr_leader_buffer[8]);
+  printf("Application indicator: %c\n", first_dr_leader_buffer[9]);
+
+  // Print other fixed-width Leader fields.
+  printf("Field control length: %.2s\n", first_dr_leader_buffer + 10);
+  printf("Base address: %.5s\n", first_dr_leader_buffer + 12);
+  printf("Extended character set: %.3s\n", first_dr_leader_buffer + 17);
+  printf("Entry map: %.4s\n", first_dr_leader_buffer + 20);
+
+  int dr_base_address = atoi(first_dr_leader_buffer + 12);
+  int dr_length_field_size = first_dr_leader_buffer[20] - '0';
+  int dr_position_field_size = first_dr_leader_buffer[21] - '0';
+  int dr_reserved_field_size = first_dr_leader_buffer[22] - '0';
+  int dr_tag_field_size = first_dr_leader_buffer[23] - '0';
+
+  int dr_entry_size = dr_length_field_size + dr_position_field_size +
+                      dr_reserved_field_size + dr_tag_field_size;
+
+  int dr_directory_size = dr_base_address - LEADER_SIZE - 1;
+
+  int dr_entry_count = dr_directory_size / dr_entry_size;
+
+  // printf("directory size : %d\nentry count : %d\nentry size : %d\n",
+  //        dr_directory_size, dr_entry_count, dr_entry_size);
+  //
+
+  printf("\n--- ISO 8211 DR Directory ---\n");
+
+  printf("Length field size   : %d\n", dr_length_field_size);
+  printf("Position field size : %d\n", dr_position_field_size);
+  printf("Reserved field size : %d\n", dr_reserved_field_size);
+  printf("Tag field size      : %d\n", dr_tag_field_size);
+
+  printf("Directory size      : %d bytes\n", dr_directory_size);
+  printf("Entry size          : %d bytes\n", dr_entry_size);
+  printf("Entry count         : %d\n", dr_entry_count);
+
+  char *dr_directory_buffer = malloc(dr_directory_size + 1);
+
+  if (dr_directory_buffer == NULL) {
+    perror("malloc");
+    close(file_fd);
+    free(directory_buffer);
+    free(field_buffer);
+    return EXIT_FAILURE;
+  }
+
+  ssize_t dr_directory_read = 0;
+
+  while (dr_directory_read < dr_directory_size) {
+    ssize_t bytes_read = read(file_fd, dr_directory_buffer + dr_directory_read,
+                              dr_directory_size - (ssize_t)dr_directory_read);
+
+    if (bytes_read == -1) {
+      if (errno == EINTR)
+        continue;
+
+      perror("Directory read failed");
+      close(file_fd);
+      free(dr_directory_buffer);
+      free(directory_buffer);
+      free(field_buffer);
+      return EXIT_FAILURE;
+    }
+
+    if (bytes_read == 0) {
+      fprintf(stderr, "Unexpected end of file\n");
+      close(file_fd);
+      free(dr_directory_buffer);
+      free(directory_buffer);
+      free(field_buffer);
+      return EXIT_FAILURE;
+    }
+    dr_directory_read += bytes_read;
+  }
+
+  printf("\n--- Parsed Directory Entries ---\n");
+  printf("Entry\tTag\tLength\tPosition\n");
+
+  int dsid_length = 0;
+  int dsid_position = 0;
+  for (int i = 0; i < dr_entry_count; i++) {
+    char tag[5];
+    char length_str[7];
+    char position_str[7];
+
+    char *entry = dr_directory_buffer + (i * dr_entry_size);
+    memcpy(tag, entry, dr_tag_field_size);
+    tag[dr_tag_field_size] = '\0';
+
+    memcpy(length_str, entry + dr_tag_field_size, dr_length_field_size);
+    length_str[dr_length_field_size] = '\0';
+
+    memcpy(position_str,
+           entry + dr_tag_field_size + dr_length_field_size +
+               dr_reserved_field_size,
+           dr_position_field_size);
+    position_str[dr_position_field_size] = '\0';
+
+    int field_length = atoi(length_str);
+    int field_position = atoi(position_str);
+
+    if (strcmp(tag, "DSID") == 0) {
+      dsid_length = field_length;
+      dsid_position = field_position;
+    }
+
+    printf("%02d\t%s\t%d\t%d\n", i + 1, tag, field_length, field_position);
+  }
+
+  printf("DISD Position : %d\n DSIS Length : %d\n", dsid_position, dsid_length);
+
+  // ---------------------------------------------------------
+  // 10. EXTRACT DSID FIELD FROM FIRST DR
+  // ---------------------------------------------------------
+
+  // The DR Field Area begins at dr_base_address.
+  // DSID position is relative to the beginning of that Field Area.
+  //
+  // Absolute file offset:
+  // DR record start + DR base address + DSID position
+  unsigned long dsid_offset = first_dr_offset + dr_base_address + dsid_position;
+
+  printf("\n--- DSID Field ---\n");
+  printf("DSID length   : %d bytes\n", dsid_length);
+  printf("DSID position : %d\n", dsid_position);
+  printf("File offset   : %lu\n", dsid_offset);
+
+  // Allocate memory to hold the complete DSID field.
+  char *dsid_buffer = malloc(dsid_length);
+
+  if (dsid_buffer == NULL) {
+    perror("malloc");
+    close(file_fd);
+    free(dr_directory_buffer);
+    free(directory_buffer);
+    free(field_buffer);
+    return EXIT_FAILURE;
+  }
+
+  // Move to the DSID field's absolute file offset.
+  if (lseek(file_fd, dsid_offset, SEEK_SET) == -1) {
+    perror("lseek");
+    free(dsid_buffer);
+    free(dr_directory_buffer);
+    free(directory_buffer);
+    free(field_buffer);
+    close(file_fd);
+    return EXIT_FAILURE;
+  }
+
+  // Read the DSID field.
+  ssize_t dsid_read = 0;
+
+  while (dsid_read < dsid_length) {
+    ssize_t bytes_read =
+        read(file_fd, dsid_buffer + dsid_read, dsid_length - (size_t)dsid_read);
+
+    if (bytes_read == -1) {
+      if (errno == EINTR)
+        continue;
+
+      perror("DSID read failed");
+      free(dsid_buffer);
+      free(dr_directory_buffer);
+      free(directory_buffer);
+      free(field_buffer);
+      close(file_fd);
+      return EXIT_FAILURE;
+    }
+
+    if (bytes_read == 0) {
+      fprintf(stderr, "Unexpected end of file while reading DSID\n");
+      free(dsid_buffer);
+      free(dr_directory_buffer);
+      free(directory_buffer);
+      free(field_buffer);
+      close(file_fd);
+      return EXIT_FAILURE;
+    }
+
+    dsid_read += bytes_read;
+  }
+
+  // Print the raw DSID bytes.
+  for (int i = 0; i < dsid_length; i++) {
+    printf("%02X ", (unsigned char)dsid_buffer[i]);
+
+    if ((i + 1) % 16 == 0)
+      printf("\n");
+  }
+
+  printf("\n");
+  // ---------------------------------------------------------
+  // 10. CLEAN UP
   // ---------------------------------------------------------
 
   // Release dynamically allocated memory.
   free(field_buffer);
   free(directory_buffer);
-
+  free(dr_directory_buffer);
+  free(dsid_buffer);
   // Close the file descriptor.
   close(file_fd);
 
