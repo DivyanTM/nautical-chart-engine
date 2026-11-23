@@ -11,6 +11,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 add_executable(nautical_chart_engine
    src/main.c
+   src/iso8211/leader_parser.c
 )
 
 target_include_directories(nautical_chart_engine PRIVATE
