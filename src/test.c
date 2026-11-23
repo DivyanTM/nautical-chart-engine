@@ -628,6 +628,34 @@ int main(void) {
   }
 
   printf("\n");
+
+  // ---------------------------------------------------------
+  // PRINT DSID AS READABLE CHARACTERS
+  // ---------------------------------------------------------
+  printf("\n--- DSID (Readable) ---\n");
+
+  for (int i = 0; i < dsid_length; i++) {
+    unsigned char byte = (unsigned char)dsid_buffer[i];
+
+    // ISO 8211 control characters.
+    if (byte == 0x1F) {
+      printf("<UT>");
+    } else if (byte == 0x1E) {
+      printf("<FT>");
+    }
+
+    // Printable ASCII characters.
+    else if (byte >= 0x20 && byte <= 0x7E) {
+      printf("%c", byte);
+    }
+
+    // Binary or other non-printable bytes.
+    else {
+      printf("<0x%02X>", byte);
+    }
+  }
+
+  printf("\n");
   // ---------------------------------------------------------
   // 10. CLEAN UP
   // ---------------------------------------------------------
