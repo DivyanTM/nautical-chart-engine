@@ -5,7 +5,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "domain/directory_entry.h"
 #include "domain/leader.h"
+#include "iso8211/directory_parser.h"
 #include "iso8211/leader_parser.h"
 
 #define LEADER_SIZE 24
@@ -47,14 +49,11 @@ int main(void) {
     total_read += (size_t)bytes_read;
   }
 
-
   leader_buffer[LEADER_SIZE] = '\0';
 
   iso8211_leader leader = {0};
 
-
-  int result =
-      iso8211_parse_leader(leader_buffer, &leader);
+  int result = iso8211_parse_leader(leader_buffer, &leader);
 
   printf("\nParse result: %d\n", result);
 
@@ -74,25 +73,76 @@ int main(void) {
   printf("Version Number           : %u\n", leader.version_number);
   printf("Application Indicator     : %c\n", leader.application_indicator);
   printf("Field Control Length     : %u\n", leader.field_control_length);
-  printf("Base Address Field Area : %u\n",
-         leader.base_address_field_area);
+  printf("Base Address Field Area : %u\n", leader.base_address_field_area);
 
   printf("Extended Character Set  : %s\n", leader.extended_char_set);
 
   printf("\n--- Entry Map ---\n");
 
-  printf("Field Length Width  : %u\n",
-         leader.entry_map.size_of_field_length);
+  printf("Field Length Width  : %u\n", leader.entry_map.size_of_field_length);
 
   printf("Field Position Width : %u\n",
          leader.entry_map.size_of_field_position);
 
-  printf("Reserved            : %u\n",
-         leader.entry_map.reserved);
+  printf("Reserved            : %u\n", leader.entry_map.reserved);
 
-  printf("Field Tag Width     : %u\n",
-         leader.entry_map.size_of_field_tag);
+  printf("Field Tag Width     : %u\n", leader.entry_map.size_of_field_tag);
 
+  size_t directory_size = leader.base_address_field_area - 24 - 1;
+
+  char *directory_buffer = malloc(directory_size + 1);
+
+  size_t directory_content_read = 0;
+
+  while (directory_content_read < directory_size) {
+    ssize_t bytes_read =
+        read(file_fd, directory_buffer + directory_content_read,
+             directory_size - (size_t)directory_content_read);
+    if (bytes_read == -1) {
+      if (errno == EINTR)
+        continue;
+
+      perror("Leader read failed");
+      free(directory_buffer);
+      close(file_fd);
+      return EXIT_FAILURE;
+    }
+
+    if (bytes_read == 0) {
+      fprintf(stderr, "Unexpected end of file\n");
+      free(directory_buffer);
+      close(file_fd);
+      return EXIT_FAILURE;
+    }
+    directory_content_read += bytes_read;
+  }
+
+  directory_buffer[directory_size] = '\0';
+
+  // printf("directory buffer : %s\n", directory_buffer);
+
+  iso8211_directory_entry *parsed_entries = NULL;
+  size_t entry_count = 0;
+
+  int entry_parse_result = iso8211_parse_directory(
+      directory_buffer, directory_size, &leader, &parsed_entries, &entry_count);
+
+  if (entry_parse_result == 0 && entry_count > 0) {
+    printf("\n");
+    printf("--- ENTRIES ---\n\n");
+    printf("Entry count: %zu\n\n", entry_count);
+
+    printf("%-10s | %-10s | %-10s\n", "TAG", "LENGTH", "POSITION");
+
+    printf("------------|------------|------------\n");
+
+    for (size_t i = 0; i < entry_count; i++) {
+      printf("%-10s | %-10u | %-10u\n", parsed_entries[i].tag,
+             parsed_entries[i].field_length, parsed_entries[i].field_position);
+    }
+  }
+
+  free(directory_buffer);
   close(file_fd);
 
   return EXIT_SUCCESS;
