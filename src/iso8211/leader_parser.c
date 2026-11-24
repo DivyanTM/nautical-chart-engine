@@ -1,5 +1,7 @@
+
 #include "iso8211/leader_parser.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -19,17 +21,16 @@ static int parse_decimal(const char *raw, size_t length,
 
   for (size_t i = 0; i < length; i++) {
     if (buffer[i] < '0' || buffer[i] > '9') {
+      fprintf(stderr, "Non-decimal byte in field: '%s'\n", buffer);
       return -1;
     }
   }
 
   *result = strtoul(buffer, NULL, 10);
-
   return 0;
 }
 
-int iso8211_parse_leader(const char *raw,
-                         iso8211_leader *leader) {
+int iso8211_parse_leader(const char *raw, iso8211_leader *leader) {
   if (raw == NULL || leader == NULL) {
     return -1;
   }
@@ -44,10 +45,7 @@ int iso8211_parse_leader(const char *raw,
   temp.record_length = value;
 
   // INTERCHANGE LEVEL
-  if (parse_decimal(raw + 5, 1, &value) != 0) {
-    return -1;
-  }
-  temp.interchange_level = value;
+  temp.interchange_level = raw[5];
 
   // LEADER IDENTIFIER
   if (raw[6] != 'L' && raw[6] != 'D') {
@@ -59,19 +57,20 @@ int iso8211_parse_leader(const char *raw,
   temp.inline_code_extension = raw[7];
 
   // VERSION NUMBER
-  if (parse_decimal(raw + 8, 1, &value) != 0) {
-    return -1;
-  }
-  temp.version_number = value;
+  temp.version_number = raw[8];
 
   // APPLICATION INDICATOR
   temp.application_indicator = raw[9];
 
   // FIELD CONTROL LENGTH
-  if (parse_decimal(raw + 10, 2, &value) != 0) {
-    return -1;
+  if (temp.leader_identifier == 'L') {
+    if (parse_decimal(raw + 10, 2, &value) != 0) {
+      return -1;
+    }
+    temp.field_control_length = value;
+  } else {
+    temp.field_control_length = 0;
   }
-  temp.field_control_length = value;
 
   // BASE ADDRESS OF FIELD AREA
   if (parse_decimal(raw + 12, 5, &value) != 0) {
