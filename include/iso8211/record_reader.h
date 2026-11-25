@@ -10,4 +10,4 @@ int iso8211_parse_record(const char *raw, size_t raw_size,
 
 void iso8211_free_record(iso8211_record *record);
 
-#endif ISO8211_RECORD_READER_H
+#endif // ISO8211_RECORD_READER_H
