@@ -1,3 +1,4 @@
+
 #include "iso8211/record_reader.h"
 
 #include "domain/directory_entry.h"
@@ -24,6 +25,8 @@ int iso8211_parse_record(const char *raw, size_t raw_size,
     return -1;
   }
 
+  /* Parse Leader */
+
   char leader_buffer[LEADER_SIZE + 1];
 
   memcpy(leader_buffer, raw, LEADER_SIZE);
@@ -41,6 +44,8 @@ int iso8211_parse_record(const char *raw, size_t raw_size,
     fprintf(stderr, "Invalid base address\n");
     return -1;
   }
+
+  /* Parse Directory */
 
   size_t directory_size = leader.base_address_field_area - 25;
 
@@ -64,22 +69,56 @@ int iso8211_parse_record(const char *raw, size_t raw_size,
     return -1;
   }
 
+  /* Extract Field Area */
+
   size_t field_area_offset = leader.base_address_field_area;
   size_t field_area_length = raw_size - field_area_offset;
 
-  uint8_t *field_area = malloc(field_area_length);
+  /* Validate Directory Entry Boundaries */
 
-  if (field_area == NULL && field_area_length > 0) {
-    fprintf(stderr, "Field area allocation failed\n");
-    free(directory_buffer);
-    return -1;
+  for (size_t i = 0; i < entry_count; i++) {
+    size_t position = parsed_entries[i].field_position;
+    size_t length = parsed_entries[i].field_length;
+
+    if (position > field_area_length || length > field_area_length - position) {
+      fprintf(stderr, "Directory entry exceeds field area bounds: %s\n",
+              parsed_entries[i].tag);
+
+      iso8211_record temp_record = {0};
+      temp_record.directory = parsed_entries;
+      temp_record.directory_count = entry_count;
+
+      iso8211_free_record(&temp_record);
+      free(directory_buffer);
+
+      return -1;
+    }
   }
 
+  /* Allocate and Copy Field Area */
+
+  uint8_t *field_area = NULL;
+
   if (field_area_length > 0) {
+    field_area = malloc(field_area_length);
+
+    if (field_area == NULL) {
+      fprintf(stderr, "Field area allocation failed\n");
+
+      iso8211_record temp_record = {0};
+      temp_record.directory = parsed_entries;
+      temp_record.directory_count = entry_count;
+
+      iso8211_free_record(&temp_record);
+      free(directory_buffer);
+
+      return -1;
+    }
+
     memcpy(field_area, raw + field_area_offset, field_area_length);
   }
 
-  // printf("Last field-area byte: 0x%02X\n", (unsigned char)raw[raw_size - 1]);
+  /* Populate Record */
 
   iso8211_record temp_record = {0};
 
@@ -92,6 +131,7 @@ int iso8211_parse_record(const char *raw, size_t raw_size,
   *record = temp_record;
 
   free(directory_buffer);
+
   return 0;
 }
 
@@ -99,12 +139,16 @@ void iso8211_free_record(iso8211_record *record) {
   if (record == NULL) {
     return;
   }
+
   if (record->directory != NULL) {
     for (size_t i = 0; i < record->directory_count; i++) {
       free(record->directory[i].tag);
     }
+
     free(record->directory);
   }
+
   free(record->field_area);
+
   *record = (iso8211_record){0};
 }
