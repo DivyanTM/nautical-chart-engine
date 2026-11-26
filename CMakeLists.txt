@@ -28,6 +28,7 @@ add_executable(nautical_chart_engine
    src/iso8211/leader_parser.c
    src/iso8211/directory_parser.c
    src/iso8211/record_reader.c
+   src/iso8211/ddr_parser.c
 )
 
 target_include_directories(nautical_chart_engine PRIVATE

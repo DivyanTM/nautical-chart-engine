@@ -39,6 +39,11 @@ int iso8211_parse_record(const char *raw, size_t raw_size,
     return -1;
   }
 
+  if (leader.record_length != raw_size) {
+    fprintf(stderr, "Record length mismatch\n");
+    return -1;
+  }
+
   if (leader.base_address_field_area < 25 ||
       leader.base_address_field_area > raw_size) {
     fprintf(stderr, "Invalid base address\n");

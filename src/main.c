@@ -8,8 +8,10 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "domain/field_definition.h"
 #include "domain/leader.h"
 #include "domain/record.h"
+#include "iso8211/ddr_parser.h"
 #include "iso8211/leader_parser.h"
 #include "iso8211/record_reader.h"
 
@@ -157,6 +159,21 @@ static void print_field_area(const iso8211_record *record) {
   printf("\n");
 }
 
+static void
+print_field_definition_table(const iso8211_field_definition_table *table) {
+  printf("\n--- FIELD DEFINITION TABLE ---\n");
+
+  for (size_t i = 0; i < table->count; i++) {
+    const iso8211_field_definition *def = &table->definitions[i];
+
+    printf("\nTag              : %s\n", def->tag);
+    printf("Field Name       : %s\n", def->field_name);
+    printf("Array Descriptor : %s\n", def->array_descriptor);
+    printf("Format Controls  : %s\n", def->format_controls);
+  }
+  printf("\n");
+}
+
 static int process_record(int fd, off_t offset, const char *label) {
   char *raw_record = NULL;
   size_t record_size = 0;
@@ -235,6 +252,23 @@ int main(void) {
   print_directory(&ddr_record);
   print_field_area(&ddr_record);
 
+  iso8211_field_definition_table table = {0};
+
+  if (iso8211_parse_ddr(&ddr_record, &table) != 0) {
+    fprintf(stderr, "DDR parsing failed\n");
+
+    iso8211_free_ddr(&table);
+    iso8211_free_record(&ddr_record);
+
+    free(ddr_raw);
+    close(file_fd);
+
+    return EXIT_FAILURE;
+  }
+
+  print_field_definition_table(&table);
+
+  iso8211_free_ddr(&table);
   iso8211_free_record(&ddr_record);
   free(ddr_raw);
 
@@ -249,4 +283,4 @@ int main(void) {
   close(file_fd);
 
   return EXIT_SUCCESS;
-  // }
+}
